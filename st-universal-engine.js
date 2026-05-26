@@ -14,7 +14,7 @@
     let matchSource = null;
 
     // ==========================================
-    // 1. محرك جدول المباريات (الرئيسية)
+    // محرك جدول المباريات (الرئيسية)
     // ==========================================
     function initSchedule() {
         const scheduleApp = document.getElementById('st-schedule-app');
@@ -28,12 +28,10 @@
             
             scheduleContent.innerHTML = '<div style="padding:40px; text-align:center; color:var(--st-sport-muted);"><i class="fas fa-circle-notch fa-spin fa-2x" style="color:var(--st-sport-primary);"></i><p style="margin-top:10px; font-weight:bold;">جاري مزامنة المباريات...</p></div>';
             
-            // حساب التاريخ
             const d = new Date();
             d.setDate(d.getDate() + parseInt(dayOffset));
             const dateStr = d.toISOString().split('T')[0];
 
-            // رابط الـ SSE مع التاريخ
             const sseUrl = `${API_BASE_URL}?token=${API_TOKEN}&domain=${CLIENT_DOMAIN}&date=${dateStr}`;
             
             scheduleSource = new EventSource(sseUrl);
@@ -57,7 +55,6 @@
             };
         }
 
-        // تفاعل أزرار الأيام
         tabs.forEach(tab => {
             tab.addEventListener('click', function() {
                 tabs.forEach(t => t.classList.remove('active'));
@@ -66,7 +63,7 @@
             });
         });
 
-        // جلب مباريات اليوم افتراضياً
+        // تشغيل الجلب فوراً
         fetchMatches("0");
     }
 
@@ -108,7 +105,7 @@
     }
 
     // ==========================================
-    // 2. محرك تفاصيل المباراة (الصفحة الفردية)
+    // محرك تفاصيل المباراة
     // ==========================================
     function initMatchDetails() {
         const detailsApp = document.getElementById('st-match-details-app');
@@ -118,7 +115,6 @@
         const matchId = urlParams.get('match_id');
         if (!matchId) { detailsApp.innerHTML = "<h3 style='text-align:center; padding:50px;'>لم يتم تحديد مباراة.</h3>"; return; }
 
-        // تفاعل تبويبات المباراة
         const tabs = detailsApp.querySelectorAll('.st-d-tab');
         tabs.forEach(tab => {
             tab.addEventListener('click', function() {
@@ -144,7 +140,7 @@
     }
 
     function renderMatchDetails(m) {
-        // 1. لوحة النتيجة
+        // تحديث لوحة النتيجة
         const sb = document.getElementById('st-match-scoreboard');
         if(sb) {
             const score = (m.score && m.score.trim() !== '') ? m.score : 'VS';
@@ -167,7 +163,7 @@
             `;
         }
 
-        // 2. المقال التلقائي
+        // تحديث المقال
         const articleTab = document.getElementById('st-article-content');
         if(articleTab) {
             articleTab.innerHTML = `
@@ -177,99 +173,20 @@
                 <p>حالة المباراة حالياً: <b>${m.status || 'غير محدد'}</b>، والنتيجة المسجلة حتى اللحظة هي (<b>${m.score || 'تعادل سلبي'}</b>).</p>
             `;
         }
-
-        // 3. الإحصائيات
-        const statsTab = document.getElementById('st-tab-stats');
-        if (statsTab) {
-            if (m.statistics && Object.keys(m.statistics).length > 0) {
-                // التعامل مع الـ JSON المرفق الخاص بك (كائن وليس مصفوفة)
-                let statsHtml = '';
-                const statsMap = {
-                    "ball_possession": "الاستحواذ", "goal_attempts": "تسديدات", "shots_on_goal": "تسديدات على المرمى",
-                    "corner_kicks": "ركلات ركنية", "fouls": "الأخطاء", "yellow_cards": "بطاقات صفراء"
-                };
-
-                for (const [key, arName] of Object.entries(statsMap)) {
-                    if (m.statistics.team1 && m.statistics.team1[key] && m.statistics.team2[key]) {
-                        const val1Str = m.statistics.team1[key].toString();
-                        const val2Str = m.statistics.team2[key].toString();
-                        const val1 = parseInt(val1Str.replace(/[^0-9]/g, '')) || 0;
-                        const val2 = parseInt(val2Str.replace(/[^0-9]/g, '')) || 0;
-                        const total = val1 + val2 === 0 ? 1 : val1 + val2;
-                        const pct1 = (val1 / total) * 100;
-                        const pct2 = (val2 / total) * 100;
-
-                        statsHtml += `
-                        <div class="st-stat-row">
-                            <div class="st-stat-labels">
-                                <span>${val1Str}</span>
-                                <span style="color:var(--st-sport-primary);">${arName}</span>
-                                <span>${val2Str}</span>
-                            </div>
-                            <div class="st-stat-bar-bg">
-                                <div class="st-stat-bar-t1" style="width: ${pct1}%"></div>
-                                <div class="st-stat-bar-t2" style="width: ${pct2}%"></div>
-                            </div>
-                        </div>`;
-                    }
-                }
-                statsTab.innerHTML = statsHtml || "<p style='text-align:center;'>الإحصائيات غير متوفرة حالياً.</p>";
-            } else {
-                statsTab.innerHTML = "<p style='text-align:center;'>الإحصائيات غير متوفرة حالياً.</p>";
-            }
-        }
-
-        // 4. التشكيل 3D
-        const lineupTab = document.getElementById('st-tab-lineup');
-        if (lineupTab) {
-            if (m.lineups && m.lineups.team1 && m.lineups.team2) {
-                const renderRows = (players) => {
-                    if(!players || players.length === 0) return '';
-                    const rows = players.length >= 11 ? [ players.slice(0,1), players.slice(1,5), players.slice(5,8), players.slice(8,11) ] : [players];
-                    let rHtml = '';
-                    rows.forEach(r => {
-                        rHtml += `<div class="st-formation-row">`;
-                        r.forEach(p => {
-                            rHtml += `
-                            <div class="st-player">
-                                <img src="${p.image}" class="st-player-img" onerror="this.src='https://dummyimage.com/40/1e293b/fff&text=${p.number}'">
-                                <div class="st-player-info"><span style="color:#facc15;">${p.number}</span> ${p.name.split(' ').pop()}</div>
-                            </div>`;
-                        });
-                        rHtml += `</div>`;
-                    });
-                    return rHtml;
-                };
-
-                lineupTab.innerHTML = `
-                    <div style="display:flex; justify-content:space-between; margin-bottom:15px; font-weight:bold;">
-                        <span style="color:var(--st-sport-primary);">${m.team1}</span>
-                        <span style="color:var(--st-sport-red);">${m.team2}</span>
-                    </div>
-                    <div class="st-pitch">
-                        <div class="st-pitch-lines"></div>
-                        <div style="height:50%; display:flex; flex-direction:column; justify-content:space-between; padding-bottom:10px; z-index:5;">
-                            ${renderRows(m.lineups.team1.starting)}
-                        </div>
-                        <div style="height:50%; display:flex; flex-direction:column-reverse; justify-content:space-between; padding-top:10px; z-index:5;">
-                            ${renderRows(m.lineups.team2.starting)}
-                        </div>
-                    </div>
-                `;
-            } else {
-                lineupTab.innerHTML = "<p style='text-align:center;'>التشكيلات لم تصدر بعد.</p>";
-            }
-        }
     }
 
     // ==========================================
-    // 3. المشغل التلقائي
+    // المشغل الآمن (ضمان اكتمال تحميل عناصر الصفحة)
     // ==========================================
-    if (document.getElementById('st-schedule-app')) {
-        initSchedule();
+    function runSportsEngine() {
+        if (document.getElementById('st-schedule-app')) initSchedule();
+        if (document.getElementById('st-match-details-app')) initMatchDetails();
     }
-    if (document.getElementById('st-match-details-app')) {
-        initMatchDetails();
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', runSportsEngine);
+    } else {
+        runSportsEngine();
     }
 
 })();
