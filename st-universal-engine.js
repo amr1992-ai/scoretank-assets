@@ -12,18 +12,23 @@
 
     let sseScheduleSource = null;
 
-    // 1. هندسة النتيجة لمنع الانعكاس (وضع رقم الفريق الأيمن يميناً والأيسر يساراً)
-    function formatScoreStrictRTL(scoreStr) {
+    // 1. الدالة النهائية لمنع انعكاس النتيجة (تمزيق الأرقام وتثبيتها)
+    function fixScoreDirection(scoreStr) {
         if (!scoreStr || scoreStr.trim() === '' || scoreStr === 'null') return null;
         const parts = scoreStr.split('-');
         if (parts.length === 2) {
-            // القالب RTL، لذا الجزء الأول (الفريق 1) يظهر على اليمين تلقائياً
-            return `<span class="sc-num">${parts[0].trim()}</span><span class="sc-dash">-</span><span class="sc-num">${parts[1].trim()}</span>`;
+            // تثبيت رقم الفريق الأيمن في اليمين، والأيسر في اليسار باستخدام Flex
+            return `
+            <div style="display:flex; justify-content:center; align-items:center; gap:6px; direction:rtl; width:100%;">
+                <span>${parts[0].trim()}</span>
+                <span style="color:rgba(255,255,255,0.6); font-weight:normal;">-</span>
+                <span>${parts[1].trim()}</span>
+            </div>`;
         }
         return scoreStr;
     }
 
-    // 2. تحويل وقت الـ UTC إلى توقيت محلي 12 ساعة (ص/م)
+    // 2. تحويل وقت المباراة من UTC إلى توقيت الزائر المحلي (12 ساعة ص/م)
     function getLocalTime12H(utcDateStr) {
         if (!utcDateStr) return "VS";
         const d = new Date(utcDateStr);
@@ -35,7 +40,7 @@
         return `${h}:${m} ${ampm}`;
     }
 
-    // 3. المحرك الأساسي
+    // 3. المحرك الأساسي الدقيق
     function initScheduleManager() {
         const scheduleApp = document.getElementById('st-schedule-app');
         const scheduleContent = document.getElementById('st-schedule-content');
@@ -48,36 +53,36 @@
 
             scheduleContent.innerHTML = '<div class="st-loading-skeleton"><div class="st-skel-line st-anim-pulse" style="width:200px; height:30px; margin:10px auto; border-radius:5px; background:var(--st-sp-border);"></div><div class="st-skel-card st-anim-pulse"></div><div class="st-skel-card st-anim-pulse"></div></div>';
 
-            // حساب التاريخ المحلي المستهدف بدقة لفلترة المباريات المتداخلة
+            // حساب التاريخ الفعلي للزائر (مثلاً 2026-05-26)
             const targetD = new Date();
             targetD.setDate(targetD.getDate() + parseInt(dayOffset));
-            const targetDateStr = targetD.getFullYear() + '-' + String(targetD.getMonth()+1).padStart(2,'0') + '-' + String(targetD.getDate()).padStart(2,'0');
+            const targetDateStr = targetD.getFullYear() + '-' + String(targetD.getMonth() + 1).padStart(2, '0') + '-' + String(targetD.getDate()).padStart(2, '0');
 
-            let dateKeyword = 'today';
-            if (dayOffset == -1) dateKeyword = 'yesterday';
-            if (dayOffset == 1) dateKeyword = 'tomorrow';
+            // إرسال التاريخ الفعلي الدقيق للسيرفر لمنع جلب بيانات يوم 22
+            const fetchUrl = `${API_HOST}/matches?token=${API_TOKEN}&domain=${CLIENT_DOMAIN}&date=${targetDateStr}`;
 
-            fetch(`${API_HOST}/matches?token=${API_TOKEN}&domain=${CLIENT_DOMAIN}&date=${dateKeyword}`)
+            // استخدام cache: 'no-store' لتدمير أي كاش قديم
+            fetch(fetchUrl, { cache: "no-store" })
                 .then(res => res.json())
                 .then(response => {
                     let matches = (response.success && response.data) ? response.data : (Array.isArray(response) ? response : []);
                     
-                    // الفلترة الجراحية: منع أي مباراة من الظهور في تبويب خاطئ بسبب التوقيت
+                    // الفلترة الصارمة (Strict Filter): نتأكد أن تاريخ المباراة يطابق تاريخ التبويب
                     matches = matches.filter(m => {
-                        if (!m.date) return true;
-                        const mDate = new Date(m.date); // تحويل التاريخ لوقت الزائر المحلي
-                        const mLocalStr = mDate.getFullYear() + '-' + String(mDate.getMonth()+1).padStart(2,'0') + '-' + String(mDate.getDate()).padStart(2,'0');
+                        if (!m.date) return false;
+                        const mDate = new Date(m.date);
+                        const mLocalStr = mDate.getFullYear() + '-' + String(mDate.getMonth() + 1).padStart(2, '0') + '-' + String(mDate.getDate()).padStart(2, '0');
                         return mLocalStr === targetDateStr;
                     });
 
                     if (matches.length === 0) {
-                        scheduleContent.innerHTML = '<div style="padding:50px; text-align:center; font-weight:bold; color:var(--st-sp-muted);">لا توجد مباريات متاحة في هذا اليوم.</div>';
+                        scheduleContent.innerHTML = '<div style="padding:50px; text-align:center; font-weight:bold; color:var(--st-sp-muted);">لا توجد مباريات في هذا اليوم.</div>';
                         return;
                     }
 
                     buildMatchesDOM(matches, scheduleContent);
 
-                    // تشغيل البث المباشر للأهداف فقط في تبويب "اليوم"
+                    // تفعيل البث المباشر (SSE) لمباريات اليوم الجارية فقط
                     if (dayOffset == 0) {
                         const sseUrl = `${API_HOST}/sse?token=${API_TOKEN}&domain=${CLIENT_DOMAIN}`;
                         sseScheduleSource = new EventSource(sseUrl);
@@ -101,15 +106,15 @@
                 if (this.classList.contains('active')) return;
                 tabButtons.forEach(t => t.classList.remove('active'));
                 this.classList.add('active');
-                fetchMatches(this.getAttribute('data-offset'));
+                fetchMatches(this.getAttribute('data-offset')); // data-offset: -1, 0, 1
             });
         });
 
-        // تشغيل مباريات اليوم فوراً
+        // تشغيل تبويب اليوم فوراً
         fetchMatches("0");
     }
 
-    // 4. بناء هيكل الجدول
+    // 4. بناء الهيكل بدقة عالية وتوزيع الملعب
     function buildMatchesDOM(matches, container) {
         const leaguesGroup = {};
         
@@ -125,48 +130,61 @@
             
             DOMHtml += `
                 <div class="st-league-group-wrapper">
-                    <div class="st-league-group-title">
+                    <div class="st-league-title">
                         <img src="${leagueLogo}" onerror="this.style.display='none'">
                         <span>${leagueName}</span>
                     </div>`;
 
             leagueMatches.forEach(m => {
-                // ضبط النتيجة أو التوقيت المحلي
-                const formattedScore = formatScoreStrictRTL(m.score);
-                const scoreDisplay = formattedScore ? formattedScore : getLocalTime12H(m.date);
+                const fixedScore = fixScoreDirection(m.score);
+                const scoreDisplay = fixedScore ? fixedScore : getLocalTime12H(m.date);
                 
-                // تحديد الحالة والعداد
                 let statusText = m.status || 'لم تبدأ';
                 let statusClass = 'st-status-txt-lbl';
                 let timerHtml = '';
 
+                // معالجة حالة المباراة والعداد
                 if (statusText.includes('مباشر') || statusText.includes('شوط') || statusText.includes('إضافي')) {
                     statusClass += ' st-live-active';
                     if (m.timer && m.timer !== 'null') {
-                        timerHtml = `<span style="background:#fee2e2; color:#ef4444; padding:1px 5px; border-radius:4px; margin-right:4px;">${m.timer}'</span>`;
+                        timerHtml = `<span style="background:#fee2e2; color:#ef4444; padding:2px 6px; border-radius:4px; margin-right:4px;">${m.timer}'</span>`;
                     }
                 } else if (statusText === 'انتهت') {
                     statusClass += ' ended-match';
+                    statusText = 'انتهت';
                 }
 
+                // عرض الملعب والقناة
+                const channelDisplay = (m.channels && m.channels.length > 0) ? `📺 ${m.channels[0]}` : '';
+                const stadiumDisplay = m.stadium ? `🏟️ ${m.stadium}` : '';
+
+                // تخزين البيانات للانتقال لصفحة التفاصيل لاحقاً
+                const bridgePayload = encodeURIComponent(JSON.stringify({ t1: m.team1, t2: m.team2, l1: m.team1_logo, l2: m.team2_logo, lg: leagueName, st: m.stadium }));
+
                 DOMHtml += `
-                    <a href="/p/match.html?match_id=${m.match_id}" class="st-match-item-row" id="match-row-${m.match_id}">
-                        <div class="st-box-team st-team-home">
-                            <span class="st-team-title-lbl">${m.team1}</span>
+                    <a href="/p/match.html?match_id=${m.match_id}" class="st-match-row" id="match-row-${m.match_id}" onclick="localStorage.setItem('st_match_bridge', decodeURIComponent('${bridgePayload}'))">
+                        <div class="st-team st-team-home">
+                            <span class="st-team-name">${m.team1}</span>
                             <img src="${m.team1_logo}" onerror="this.src='https://dummyimage.com/35/1e293b/fff&text=T1'">
                         </div>
                         
-                        <div class="st-box-center-score">
+                        <div class="st-match-center">
                             <div class="st-score-box" id="score-${m.match_id}">${scoreDisplay}</div>
+                            
                             <div style="display:flex; align-items:center; margin-top:5px;" id="status-wrap-${m.match_id}">
                                 <span class="${statusClass}" id="status-${m.match_id}">${statusText}</span>
                                 <span id="timer-${m.match_id}">${timerHtml}</span>
                             </div>
+                            
+                            <div class="st-channel-box" style="margin-top:3px;">
+                                <span style="display:block;">${stadiumDisplay}</span>
+                                <span style="display:block;">${channelDisplay}</span>
+                            </div>
                         </div>
                         
-                        <div class="st-box-team st-team-away">
+                        <div class="st-team st-team-away">
                             <img src="${m.team2_logo}" onerror="this.src='https://dummyimage.com/35/1e293b/fff&text=T2'">
-                            <span class="st-team-title-lbl">${m.team2}</span>
+                            <span class="st-team-name">${m.team2}</span>
                         </div>
                     </a>`;
             });
@@ -175,7 +193,7 @@
         container.innerHTML = DOMHtml;
     }
 
-    // 5. التحديث الحي
+    // 5. تحديث الأهداف الحية
     function updateLiveScoresInDOM(liveMatches) {
         liveMatches.forEach(lm => {
             const scoreElement = document.getElementById(`score-${lm.match_id}`);
@@ -183,17 +201,16 @@
             const timerElement = document.getElementById(`timer-${lm.match_id}`);
             
             if (scoreElement && lm.score && lm.score.trim() !== '') {
-                const newScore = formatScoreStrictRTL(lm.score);
+                const newScore = fixScoreDirection(lm.score);
                 if(newScore) scoreElement.innerHTML = newScore;
             }
             
             if (statusElement && lm.status) {
                 statusElement.innerText = lm.status;
-                
                 if (lm.status.includes('مباشر') || lm.status.includes('شوط') || lm.status.includes('إضافي')) {
                     statusElement.className = 'st-status-txt-lbl st-live-active';
                     if (lm.timer && lm.timer !== 'null' && timerElement) {
-                        timerElement.innerHTML = `<span style="background:#fee2e2; color:#ef4444; padding:1px 5px; border-radius:4px; margin-right:4px;">${lm.timer}'</span>`;
+                        timerElement.innerHTML = `<span style="background:#fee2e2; color:#ef4444; padding:2px 6px; border-radius:4px; margin-right:4px;">${lm.timer}'</span>`;
                     }
                 } else {
                     statusElement.className = 'st-status-txt-lbl';
@@ -204,10 +221,14 @@
         });
     }
 
+    function runSportsCoreEngine() {
+        if (document.getElementById('st-schedule-app')) initScheduleManager();
+    }
+
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initScheduleManager);
+        document.addEventListener('DOMContentLoaded', runSportsCoreEngine);
     } else {
-        initScheduleManager();
+        runSportsCoreEngine();
     }
 
 })();
