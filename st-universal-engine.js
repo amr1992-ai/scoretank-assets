@@ -2,7 +2,7 @@
     'use strict';
 
     if (!window.stSportsConfig || !window.stSportsConfig.token || !window.stSportsConfig.domain) {
-        console.error("ScoreTank API: Missing License Config.");
+        console.error("ST API: Missing Config");
         return; 
     }
 
@@ -12,43 +12,51 @@
 
     let sseScheduleSource = null;
 
-    // 1. دالة ذكية لتحويل وقت الـ UTC إلى 12 ساعة محلي (ص/م)
+    // تمزيق النتيجة وضبطها LTR (الفريق 1 يمين، الفريق 2 يسار)
+    function formatScore(scoreStr) {
+        if (!scoreStr || scoreStr.trim() === '' || scoreStr === 'null') return null;
+        const parts = scoreStr.split('-');
+        if (parts.length === 2) {
+            return `<span>${parts[0].trim()}</span> <span style="font-weight:normal; opacity:0.7;">-</span> <span>${parts[1].trim()}</span>`;
+        }
+        return scoreStr;
+    }
+
+    // تحويل الوقت إلى 12 ساعة محلي
     function getLocalTime12H(utcDateStr) {
         if (!utcDateStr) return "VS";
         const d = new Date(utcDateStr);
         return d.toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit', hour12: true });
     }
 
-    // 2. المحرك الأساسي
-    function initScheduleManager() {
+    function initSchedule() {
         const scheduleApp = document.getElementById('st-schedule-app');
         const scheduleContent = document.getElementById('st-schedule-content');
         if (!scheduleApp || !scheduleContent) return;
 
-        const tabButtons = scheduleApp.querySelectorAll('.st-tab-btn');
+        // استهداف الأزرار بالكلاس الموحد الجديد
+        const tabButtons = scheduleApp.querySelectorAll('.stk-tab-btn');
 
-        function fetchMatches(dateKeyword) { // dateKeyword = 'yesterday', 'today', 'tomorrow'
+        function fetchMatches(dateKeyword) { 
             if (sseScheduleSource) sseScheduleSource.close();
 
-            scheduleContent.innerHTML = '<div style="padding:40px; text-align:center; color:var(--st-muted);"><i class="fas fa-circle-notch fa-spin fa-2x" style="color:var(--st-primary);"></i><p style="margin-top:10px; font-weight:bold;">جاري جلب المباريات...</p></div>';
+            scheduleContent.innerHTML = '<div style="padding:40px; text-align:center; color:var(--stk-muted);"><i class="fas fa-circle-notch fa-spin fa-2x" style="color:var(--stk-primary);"></i><p style="margin-top:10px; font-weight:bold;">جاري جلب المباريات...</p></div>';
 
-            // إرسال الكلمة مباشرة للسيرفر (كما تفعل إضافة الووردبريس تماماً)
             const fetchUrl = `${API_HOST}/matches?token=${API_TOKEN}&domain=${CLIENT_DOMAIN}&date=${dateKeyword}`;
 
             fetch(fetchUrl, { cache: "no-store" })
                 .then(res => res.json())
                 .then(response => {
-                    // الاعتماد الكلي على السيرفر بدون فلترة محلية تسبب أخطاء
                     let matches = (response.success && response.data) ? response.data : (Array.isArray(response) ? response : []);
                     
                     if (matches.length === 0) {
-                        scheduleContent.innerHTML = '<div style="padding:50px; text-align:center; font-weight:bold; color:var(--st-muted);">لا توجد مباريات متاحة في هذا اليوم.</div>';
+                        scheduleContent.innerHTML = '<div style="padding:50px; text-align:center; font-weight:bold; color:var(--stk-muted);">لا توجد مباريات متاحة في هذا اليوم.</div>';
                         return;
                     }
 
                     buildMatchesDOM(matches, scheduleContent);
 
-                    // تفعيل التحديث الحي (SSE) لمباريات اليوم فقط
+                    // التحديث الحي فقط لتبويب اليوم
                     if (dateKeyword === 'today') {
                         const sseUrl = `${API_HOST}/sse?token=${API_TOKEN}&domain=${CLIENT_DOMAIN}`;
                         sseScheduleSource = new EventSource(sseUrl);
@@ -57,13 +65,13 @@
                             try {
                                 const liveData = JSON.parse(event.data);
                                 const liveMatches = Array.isArray(liveData) ? liveData : (liveData.data ? liveData.data : []);
-                                updateLiveScoresInDOM(liveMatches);
+                                updateLiveScores(liveMatches);
                             } catch(e) {}
                         });
                     }
                 })
                 .catch(err => {
-                    scheduleContent.innerHTML = '<div style="padding:40px; text-align:center; color:var(--st-ended); font-weight:bold;">تعذر الاتصال بخادم المباريات.</div>';
+                    scheduleContent.innerHTML = '<div style="padding:40px; text-align:center; color:var(--stk-ended); font-weight:bold;">تعذر الاتصال بخادم المباريات.</div>';
                 });
         }
 
@@ -72,16 +80,14 @@
                 if (this.classList.contains('active')) return;
                 tabButtons.forEach(t => t.classList.remove('active'));
                 this.classList.add('active');
-                
                 fetchMatches(this.getAttribute('data-date'));
             });
         });
 
-        // التشغيل فوراً
+        // تشغيل مباريات اليوم
         fetchMatches("today");
     }
 
-    // 3. بناء الجدول وتوزيع الكروت
     function buildMatchesDOM(matches, container) {
         const leaguesGroup = {};
         matches.forEach(match => {
@@ -96,23 +102,23 @@
             
             DOMHtml += `
                 <div>
-                    <div class="st-league-header">
+                    <div class="stk-league">
                         <img src="${leagueLogo}" onerror="this.style.display='none'">
                         <span>${leagueName}</span>
                     </div>`;
 
             leagueMatches.forEach(m => {
                 const hasScore = (m.score && m.score.trim() !== '' && m.score !== 'null');
-                const scoreDisplay = hasScore ? m.score : getLocalTime12H(m.date);
+                const scoreDisplay = hasScore ? formatScore(m.score) : getLocalTime12H(m.date);
                 
                 let statusText = m.status || 'لم تبدأ';
-                let statusClass = 'st-match-status';
+                let statusClass = 'stk-status';
                 let timerHtml = '';
 
                 if (statusText.includes('مباشر') || statusText.includes('شوط') || statusText.includes('إضافي')) {
                     statusClass += ' live';
                     if (m.timer && m.timer !== 'null') {
-                        timerHtml = `<span class="st-match-timer">${m.timer}'</span>`;
+                        timerHtml = `<span class="stk-timer">${m.timer}'</span>`;
                     }
                 } else if (statusText === 'انتهت') {
                     statusClass += ' ended';
@@ -124,29 +130,30 @@
                 const bridgePayload = encodeURIComponent(JSON.stringify({ t1: m.team1, t2: m.team2, l1: m.team1_logo, l2: m.team2_logo, lg: leagueName, st: m.stadium }));
 
                 DOMHtml += `
-                    <a href="/p/match.html?match_id=${m.match_id}" class="st-match-card" id="match-row-${m.match_id}" onclick="localStorage.setItem('st_match_bridge', decodeURIComponent('${bridgePayload}'))">
+                    <a href="/p/match.html?match_id=${m.match_id}" class="stk-match" id="match-row-${m.match_id}" onclick="localStorage.setItem('st_match_bridge', decodeURIComponent('${bridgePayload}'))">
                         
-                        <div class="st-team-block home">
-                            <span class="st-team-name">${m.team1}</span>
+                        <div class="stk-team home">
+                            <span>${m.team1}</span>
                             <img src="${m.team1_logo}" onerror="this.src='https://dummyimage.com/35/1e293b/fff&text=T1'">
                         </div>
                         
-                        <div class="st-match-center">
-                            <div class="st-score-badge" id="score-${m.match_id}" dir="ltr">${scoreDisplay}</div>
+                        <div class="stk-center">
+                            <div class="stk-score" id="score-${m.match_id}" dir="ltr">${scoreDisplay}</div>
                             
                             <div class="${statusClass}" id="status-wrap-${m.match_id}">
                                 <span id="timer-${m.match_id}">${timerHtml}</span>
                                 <span id="status-${m.match_id}">${statusText}</span>
                             </div>
                             
-                            <div class="st-match-channel">
-                                ${stadiumDisplay} <br> ${channelDisplay}
+                            <div class="stk-extra">
+                                <span style="display:block;">${stadiumDisplay}</span>
+                                <span style="display:block;">${channelDisplay}</span>
                             </div>
                         </div>
                         
-                        <div class="st-team-block away">
+                        <div class="stk-team away">
                             <img src="${m.team2_logo}" onerror="this.src='https://dummyimage.com/35/1e293b/fff&text=T2'">
-                            <span class="st-team-name">${m.team2}</span>
+                            <span>${m.team2}</span>
                         </div>
                     </a>`;
             });
@@ -155,8 +162,7 @@
         container.innerHTML = DOMHtml;
     }
 
-    // 4. تحديث الأهداف
-    function updateLiveScoresInDOM(liveMatches) {
+    function updateLiveScores(liveMatches) {
         liveMatches.forEach(lm => {
             const scoreElement = document.getElementById(`score-${lm.match_id}`);
             const statusWrap = document.getElementById(`status-wrap-${lm.match_id}`);
@@ -164,19 +170,19 @@
             const timerElement = document.getElementById(`timer-${lm.match_id}`);
             
             if (scoreElement && lm.score && lm.score.trim() !== '') {
-                scoreElement.innerHTML = lm.score;
+                scoreElement.innerHTML = formatScore(lm.score);
             }
             
             if (statusWrap && lm.status) {
                 statusText.innerText = lm.status;
                 
                 if (lm.status.includes('مباشر') || lm.status.includes('شوط') || lm.status.includes('إضافي')) {
-                    statusWrap.className = 'st-match-status live';
+                    statusWrap.className = 'stk-status live';
                     if (lm.timer && lm.timer !== 'null' && timerElement) {
-                        timerElement.innerHTML = `<span class="st-match-timer">${lm.timer}'</span>`;
+                        timerElement.innerHTML = `<span class="stk-timer">${lm.timer}'</span>`;
                     }
                 } else {
-                    statusWrap.className = 'st-match-status';
+                    statusWrap.className = 'stk-status';
                     if (lm.status === 'انتهت') statusWrap.classList.add('ended');
                     if (timerElement) timerElement.innerHTML = '';
                 }
@@ -185,9 +191,9 @@
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initScheduleManager);
+        document.addEventListener('DOMContentLoaded', initSchedule);
     } else {
-        initScheduleManager();
+        initSchedule();
     }
 
 })();
